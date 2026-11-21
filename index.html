@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hant-TW" data-page="main">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>桃園找房雷達</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="style.css">
+<script src="vendor/leaflet/leaflet.js" defer></script>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-row">
+    <h1>桃園找房雷達</h1>
+    <label class="area-pick"><span>區域</span><select id="area-select"></select></label>
+    <button id="edit-profiles" type="button" class="primary">編輯條件</button>
+  </div>
+  <details class="fresh">
+    <summary id="fresh-summary">讀取資料中…</summary>
+    <div id="fresh-table"></div>
+  </details>
+</header>
+
+<noscript><p class="notice notice-error">這個網頁需要 JavaScript 才能顯示資料。</p></noscript>
+<div id="notices" aria-live="polite"></div>
+
+<section id="editor" class="editor" hidden></section>
+
+<main class="layout">
+  <section class="map-panel" aria-label="地圖">
+    <div id="map"></div>
+    <div id="legend" class="legend"></div>
+  </section>
+
+  <section class="list-panel" aria-label="清單">
+    <div id="profile-bar" class="profile-bar"></div>
+    <div class="tabs" role="tablist" aria-label="資料種類">
+      <button id="tab-listing" type="button" role="tab" class="active" aria-selected="true">開價物件</button>
+      <button id="tab-tx" type="button" role="tab" aria-selected="false">成交</button>
+    </div>
+    <div class="filters" role="group" aria-label="狀態篩選">
+      <button type="button" data-filter="match">符合</button>
+      <button type="button" data-filter="pending">待確認</button>
+      <button type="button" data-filter="all">全部</button>
+    </div>
+    <div id="detail" class="detail" hidden></div>
+    <div id="summary" class="summary"></div>
+    <ol id="list" class="cards"></ol>
+    <button id="more" type="button" class="more" hidden>顯示更多</button>
+  </section>
+</main>
+
+<footer class="footer small">
+  <p>個人條件只存在你的瀏覽器（或你產生的連結）裡；這個網頁不會把條件送到任何地方。</p>
+  <p>資料來源：實價登錄（內政部）、門牌位置坐標（桃園市政府民政局）、RCA 地下水污染管制區（環境部），依<a href="https://data.gov.tw/license" target="_blank" rel="noopener noreferrer">政府資料開放授權條款</a>使用。</p>
+  <p>底圖與部分範圍圖（特區、里界、路網車程範圍）衍生自 © OpenStreetMap 貢獻者的資料，依 <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener noreferrer">ODbL</a> 授權；<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap 版權說明</a>。</p>
+  <p>物件的事實與連結屬於各來源網站（中信房屋、住商不動產、樂屋網、東森房屋、21世紀不動產）；本站不轉存照片與描述。591、信義只提供搜尋按鈕，程式不讀取這兩個網站。</p>
+  <p>程式碼以 MIT 授權釋出；地圖元件 Leaflet 1.9.4 為 BSD-2-Clause 授權。</p>
+</footer>
+</body>
+</html>
