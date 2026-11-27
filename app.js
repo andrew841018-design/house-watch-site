@@ -587,7 +587,7 @@ function renderFreshness() {
       { class: "fresh-table" },
       el("thead", {}, el("tr", {}, el("th", { text: "來源" }), el("th", { text: "最後成功" }), el("th", { text: "最後完整掃描" }), el("th", { text: "狀態" }))),
       el("tbody", {}, rows),
-      el("thead", {}, el("tr", {}, el("th", { text: "資料集" }), el("th", { text: "最後檢查" }), el("th", { text: "資料截至／版本" }), el("th", { text: "狀態" }))),
+      el("thead", {}, el("tr", {}, el("th", { text: "資料集" }), el("th", { text: "最後成功" }), el("th", { text: "資料截至／版本" }), el("th", { text: "狀態" }))),
       el("tbody", {}, datasetRows),
     ),
     el("p", { class: "muted small", text: "時間都是台北時間。「最後成功」是最近一次成功抓到資料；「最後完整掃描」才會用來判斷下架。過期門檻依各來源分開設定。" }),
@@ -768,7 +768,7 @@ function memberLinks(group) {
       const price = isNum(member.price) ? `${wanText(member.price)} 萬` : "價格不明";
       const dropAt = typeof member.price_drop_at === "string" ? Date.parse(member.price_drop_at) : Number.NaN;
       const drop =
-        isNum(member.price) && isNum(member.price_first) && member.price < member.price_first
+        isNum(member.price) && isNum(member.price_first) && member.price_first - member.price >= RULE_CONSTANTS.PRICE_MIN_STEP_YUAN
           ? `（首次 ${wanText(member.price_first)} 萬${Number.isFinite(dropAt) ? `，${timeText(dropAt).slice(0, 10)} 降價` : ""}）`
           : "";
       const original = isNum(member.site_original_price) ? `（站方標示原價 ${wanText(member.site_original_price)} 萬）` : "";
@@ -1548,7 +1548,7 @@ function renderEditor(formFor) {
     state.profiles.length ? list : el("p", { class: "muted", text: "還沒有條件。網頁不附任何預設條件，請自己新增。" }),
     button("新增一組條件", () => renderEditor(null), { class: "primary" }),
     el("h3", { text: "保存方式" }),
-    el("p", { class: "small", text: "條件只存在你的瀏覽器或你產生的連結裡，網頁不會把它送到任何地方。" }),
+    el("p", { class: "small", text: "條件只存在你的瀏覽器或你產生的連結裡，網頁不會自己送出去；只有按 591、信義的搜尋按鈕時，會把部分條件放進那個網站的搜尋網址。" }),
     el(
       "div",
       { class: "actions" },
@@ -1575,6 +1575,7 @@ function renderEditor(formFor) {
 
 function renderAll() {
   if (!state.meta || !state.data.has(state.areaId)) return;
+  state.today = taipeiDate(Date.now()); // 網頁開著跨過午夜時，屋齡與成交月數也用今天（事後審查 P-8）
   computeResults();
   renderTabsAndFilters();
   renderProfileBar();
@@ -1760,7 +1761,21 @@ async function startSelftest() {
 
 // ---------------------------------------------------------------- 進入點
 
+// 被別的網站用 iframe 嵌入時不顯示編輯器與按鈕，避免誘騙點擊（事後審查 SA-11）。
+// meta CSP 設不了 frame-ancestors，GitHub Pages 也不能加回應標頭，所以在這裡擋。
+function framedByAnotherSite() {
+  try {
+    return window.top !== window.self;
+  } catch {
+    return true; // 跨網域的上層視窗讀不到，就是被嵌入
+  }
+}
+
 if (typeof document !== "undefined") {
-  if (document.documentElement.dataset.page === "selftest") startSelftest();
+  if (framedByAnotherSite()) {
+    document.body.replaceChildren(
+      el("p", { text: "這個網頁不能嵌在別的網站裡。請直接打開它的網址。" }),
+    );
+  } else if (document.documentElement.dataset.page === "selftest") startSelftest();
   else startMain();
 }

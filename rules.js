@@ -105,6 +105,9 @@ export const REASONS = deepFreeze(/*<contract:REASONS>*/[
 export const RULE_CONSTANTS = deepFreeze({
   // R1-24：距離落在門檻 ±30 m 內（含）算「接近邊界」→ 待確認。
   NEAR_BOUNDARY_M: 30,
+  // 社區精度（OSM 社區名或他站同社區的座標）只到社區、不是那一戶：接近邊界放寬到 ±150 m
+  // （事後審查 P-5；契約 C2 原本只給門牌或網站座標精度距離）。
+  COMMUNITY_BOUNDARY_M: 150,
   // 中壢車程：超出所選分鐘數、但在下一檔之內的，算「接近車程門檻」→ 待確認（PLAN_v2 §4 第 3 項）。
   // evaluate() 拿不到區域的選項清單，所以「下一檔」寫成固定的寬度：選項每檔相差 2 分鐘，
   // 另一個路線引擎也普遍快約 2 分鐘。選項清單改成不同間距時，這裡要一起改。
@@ -118,6 +121,8 @@ export const RULE_CONSTANTS = deepFreeze({
   COMPS_DEFAULT_MONTHS: 12,
   // PLAN §4：新上架是首次出現後 72 小時內。
   NEW_BADGE_HOURS: 72,
+  // R3-22：價格差不到 1 萬不算一次變動；降價徽章和「首次 X 萬」也照這條（和 Python 一致）。
+  PRICE_MIN_STEP_YUAN: 10000,
 });
 
 export const PROFILE_STORAGE_KEY = "house-watch:profiles:v1";
@@ -277,20 +282,20 @@ function locationResults(kind, rec, profile) {
     if (useDrive) results.push(roadDrive(fractions, profile.drive_min));
     return results;
   }
-  if (useNear) results.push(nearCheck([metrics.d_zhonglu_m, metrics.d_yiwen_m], profile.near_m));
-  if (useRca) results.push(rcaCheck(metrics.d_rca_m, profile.rca_m));
-  if (useDrive) results.push(driveCheck(metrics, profile.drive_min));
+  const margin = precision === "community" ? RULE_CONSTANTS.COMMUNITY_BOUNDARY_M : RULE_CONSTANTS.NEAR_BOUNDARY_M;
+  if (useNear) results.push(nearCheck([metrics.d_zhonglu_m, metrics.d_yiwen_m], profile.near_m, margin));
+  if (useRca) results.push(rcaCheck(metrics.d_rca_m, profile.rca_m, margin));
+  if (useDrive) results.push(driveCheck(metrics, profile.drive_min, precision));
   return results;
 }
 
 // 周邊：到兩個特區的較小距離 ≤ near_m 算在範圍內（含本數）。
 // 距離 0 是在特區裡面，一定通過；|距離 − 門檻| ≤ 30 m 算接近邊界（R1-24）。
-function nearCheck(values, limit) {
+function nearCheck(values, limit, margin = RULE_CONSTANTS.NEAR_BOUNDARY_M) {
   const distances = values.map(nonNegInt);
   const known = distances.filter((d) => d !== null);
   if (known.length === 0) return pending("near_missing");
   const nearest = Math.min(...known);
-  const margin = RULE_CONSTANTS.NEAR_BOUNDARY_M;
   if (nearest === 0 || nearest < limit - margin) return PASS;
   // 另一個距離不知道時，它可能更近，所以不能判不符。
   if (known.length < distances.length) return pending("near_missing");
@@ -299,11 +304,10 @@ function nearCheck(values, limit) {
 }
 
 // 避開 RCA：距離 ≤ rca_m 就排除（含本數）；距離 0 是在管制區裡面，一律排除。
-function rcaCheck(value, limit) {
+function rcaCheck(value, limit, margin = RULE_CONSTANTS.NEAR_BOUNDARY_M) {
   const distance = nonNegInt(value);
   if (distance === null) return pending("rca_missing");
   if (distance === 0) return failure("rca_within");
-  const margin = RULE_CONSTANTS.NEAR_BOUNDARY_M;
   if (distance > limit + margin) return PASS;
   if (distance >= limit - margin) return pending("rca_boundary");
   return failure("rca_within");
@@ -312,11 +316,13 @@ function rcaCheck(value, limit) {
 // 中壢車程（門牌、網站座標或社區精度）。
 // C2：drive_min 是「包含這點的最小車程檔，沒有就是 null」。所以在區內、drive_min 是 null
 // 就是在每一檔之外 → 不符；drive_min 缺欄位、空字串、NaN 才是缺值。
-function driveCheck(metrics, limit) {
+function driveCheck(metrics, limit, precision = null) {
   if (metrics.in_district !== true) return pending("district_missing");
   if (metrics.drive_min === null) return failure("drive_out");
   const band = posInt(metrics.drive_min);
   if (band === null) return pending("drive_missing");
+  // 社區精度只到社區：剛好落在所選那一檔時，那一戶可能在下一檔（修完再審 F1-9）。
+  if (precision === "community" && band === limit) return pending("drive_near");
   if (band <= limit) return PASS;
   if (band <= limit + RULE_CONSTANTS.DRIVE_NEAR_BAND_MIN) return pending("drive_near");
   return failure("drive_out");
@@ -416,6 +422,11 @@ function floorCheck(loRaw, hiRaw, range) {
 }
 
 // 開價物件的主建物（0.01 坪）。網站顯示值剛好等於門檻時可能是進位來的 → 待確認（R3-10）。
+// 網站只顯示到 0.1 坪時（數值是 0.1 坪的整數倍），真正的值可能差 ±0.05 坪（事後審查 P-7）。
+function displayedSlack(cp) {
+  return cp % 10 === 0 ? 5 : 0;
+}
+
 function mainListingCheck(facts, minPing) {
   const threshold = Math.round(minPing * 100);
   if (isConflict(facts.main_cp) || isConflict(facts.main_kind)) return pending("group_conflict");
@@ -423,15 +434,16 @@ function mainListingCheck(facts, minPing) {
   if (value === null) {
     // 權狀坪一定 ≥ 主建物；權狀都不到門檻，主建物就一定不到。
     const titleArea = nonNegInt(facts.title_area_cp);
-    if (titleArea !== null && titleArea < threshold) return failure("main_under");
+    if (titleArea !== null && titleArea + displayedSlack(titleArea) < threshold) return failure("main_under");
     return pending("main_missing");
   }
+  const slack = displayedSlack(value);
   // 不論口徑（主建物或主建物＋附屬），數值都 ≥ 真正的主建物；數值不到門檻就一定不符。
-  if (value < threshold) return failure("main_under");
+  if (value + slack < threshold) return failure("main_under");
   const kind = enumValue("MainKind", facts.main_kind);
   if (kind === null) return pending("main_kind_missing");
   if (kind === "main_plus_aux") return pending("main_plus_aux");
-  if (value === threshold) return pending("main_boundary");
+  if (value - slack <= threshold && value + slack >= threshold) return pending("main_boundary");
   return PASS;
 }
 
@@ -1056,7 +1068,12 @@ export function listingBadges(group, nowMs) {
   const dropped = members.some((member) => {
     const price = nonNegInt(member.price);
     const first = nonNegInt(member.price_first);
-    return member.status === "active" && price !== null && first !== null && price < first;
+    return (
+      member.status === "active" &&
+      price !== null &&
+      first !== null &&
+      first - price >= RULE_CONSTANTS.PRICE_MIN_STEP_YUAN
+    );
   });
   if (dropped) badges.push("price_drop");
   const facts = isObject(group.facts) ? group.facts : {};
